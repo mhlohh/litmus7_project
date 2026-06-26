@@ -1,0 +1,19 @@
+Run 
+
+1 Create Enviroment on first Time
+
+    python -m venv .venv
+
+2 Activate the Enviroment
+
+    source .venv/bin/Activate
+
+3 Installing the fastapi and uvicorn
+
+    pip install fastapi uvicorn
+
+4 To run the backend
+
+    uvicorn main:app --reload
+
+Git Hub Commands
