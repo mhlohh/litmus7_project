@@ -12,3 +12,5 @@ Then, take the Business-related context from the reviews.
 root model.
 - Then root model Aggregate the sub models and filter out the data for best result
 and quality
+
+![Alt Text](pipeline-digram.png)
