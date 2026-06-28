@@ -1,7 +1,16 @@
 from fastapi import FastAPI
 from models import Product
+from contextlib import asynccontextmanager
+from gemini_model import setup, ask
 
-app = FastAPI()
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    await setup()  # runs once when server starts
+    yield
+
+
+app = FastAPI(lifespan=lifespan)
+
 
 products = [
     Product(id=1, name="phone", description="budget phone", price=99.0, quantity=10),
@@ -10,6 +19,13 @@ products = [
     Product(id=4, name="Table", description="Round Bottom Table", price=99.0, quantity=20),
     Product(id=5, name="Television", description="4k 60 hz TV", price=499.0, quantity=30),
 ]
+
+
+@app.get("/ask")
+async def ask_ai(prompt: str):
+    response = await ask(prompt)
+    return {"response": response}
+
 
 
 @app.get("/")
