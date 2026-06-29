@@ -5,7 +5,7 @@ from gemini_model import setup, ask
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    await setup()  # runs once when server starts
+    await setup() 
     yield
 
 
@@ -25,12 +25,6 @@ products = [
 async def ask_ai(prompt: str):
     response = await ask(prompt)
     return {"response": response}
-
-
-
-@app.get("/")
-def greet():
-    return "Welcome to Telusko Trac"
 
 
 @app.get("/products")

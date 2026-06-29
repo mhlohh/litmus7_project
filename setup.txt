@@ -12,6 +12,14 @@ Run
 
     pip install fastapi uvicorn
 
+4 Install dotenv
+
+    pip install dotenv
+
+5 Install google adk
+
+    pip install google-adk
+
 4 To run the backend
 
     uvicorn main:app --reload
