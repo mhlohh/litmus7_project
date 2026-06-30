@@ -2,6 +2,9 @@ from fastapi import FastAPI
 from models import Product
 from contextlib import asynccontextmanager
 from gemini_model import setup, ask
+from parallel_researcher import run_parallel_research
+from aggregator_engine import ThinkingAggregatorAgent
+import json
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -25,6 +28,17 @@ products = [
 async def ask_ai(prompt: str):
     response = await ask(prompt)
     return {"response": response}
+
+
+@app.get("/aggregate")
+async def aggregate_query(query: str):
+    raw_findings = await run_parallel_research(query)
+    aggregator = ThinkingAggregatorAgent(raw_findings)
+    report_str = await aggregator.process()
+    try:
+        return json.loads(report_str)
+    except Exception:
+        return {"error": "Failed to parse report", "raw": report_str}
 
 
 @app.get("/products")
@@ -62,4 +76,29 @@ def delete_product(id: int):
             products.remove(product)
             return {"message": f"id: {id} product removed"}
     return {"message": "Product not found!"}
+
+
+if __name__ == "__main__":
+    import argparse
+    import asyncio
+    
+    parser = argparse.ArgumentParser(description="Run the Sequential-over-Parallel ADK Aggregator pipeline.")
+    parser.add_argument("--query", type=str, required=True, help="The query to analyze.")
+    args = parser.parse_args()
+    
+    async def run_pipeline():
+        print(f"Starting pipeline for query: '{args.query}'\n")
+        print("1. Running parallel research sub-agents...")
+        raw_findings = await run_parallel_research(args.query)
+        for rf in raw_findings:
+            print(f"   [{rf['category']}] weight={rf['weight']}: {rf['raw_text'].strip()}")
+            
+        print("\n2. Running Thinking Aggregator Judge...")
+        aggregator = ThinkingAggregatorAgent(raw_findings)
+        report_json = await aggregator.process()
+        print("\n--- Final Report ---")
+        print(report_json)
+        
+    asyncio.run(run_pipeline())
+
 
