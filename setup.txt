@@ -1,27 +1,32 @@
-Run 
+Run Setup Guide
 
-1 Create Enviroment on first Time
+1. Create Environment (First Time)
+    python3 -m venv .venv
 
-    python -m venv .venv
+2. Activate the Environment
+    source .venv/bin/activate
 
-2 Activate the Enviroment
+3. Install Dependencies
+    pip install fastapi uvicorn python-dotenv google-adk litellm pymongo streamlit matplotlib pandas
 
-    source .venv/bin/Activate
+4. Configure Environment (.env)
+    Configure the following variables:
+      - LOCAL_MODEL_NAME: Main aggregator model (e.g. openai/qwen2.5-coder-7b-instruct-mlx)
+      - LOCAL_PARALLEL_MODEL_NAME: Model for parallel sub-agents (e.g. openai/llama-3.2-3b-instruct)
+      - OPENAI_API_BASE: Local server port (e.g. http://localhost:1234/v1)
+      - OPENAI_API_KEY: lm-studio
 
-3 Installing the fastapi and uvicorn
+5. Start Local LLM Server
+    Open LM Studio and start the Local Server on port 1234. Load the models you want to use.
+    For local performance optimization, you can run a lightweight model for the parallel extraction sub-agents:
+      - Qwen-2.5-1.5B-Instruct / Qwen-2.5-3B-Instruct (highly recommended)
+      - Llama-3.2-3B-Instruct / Llama-3.2-1B-Instruct
+    Load the models in LM Studio or using the CLI:
+      lms load qwen2.5-coder-7b-instruct-mlx
+      lms load llama-3.2-3b-instruct
 
-    pip install fastapi uvicorn
-
-4 Install dotenv
-
-    pip install dotenv
-
-5 Install google adk
-
-    pip install google-adk
-
-4 To run the backend
-
+6. Run the FastAPI Backend
     uvicorn main:app --reload
 
-Git Hub Commands
+7. Run the Streamlit Frontend
+    streamlit run app.py
