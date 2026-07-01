@@ -30,3 +30,4 @@ Run Setup Guide
 
 7. Run the Streamlit Frontend
     streamlit run app.py
+

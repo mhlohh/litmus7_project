@@ -131,3 +131,12 @@ async def analyze_product_reviews(product_id: int):
         "reviews_analyzed": len(reviews),
         "analysis": analysis_result
     }
+
+@app.delete("/analyze/{product_id}/cache")
+def clear_product_analysis_cache(product_id: int):
+    """Clears the cached review analysis for a product."""
+    prod = database.get_product(product_id)
+    if not prod:
+        raise HTTPException(status_code=404, detail="Product not found in reviews database")
+    database.clear_cache(product_id)
+    return {"message": f"Cache cleared successfully for product {product_id}"}

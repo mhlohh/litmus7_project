@@ -21,7 +21,7 @@ Below is the execution flow from the client request to the final response:
 ```mermaid
 graph TD
     A[Client Streamlit Frontend] -->|GET /ask?prompt=...| B[FastAPI Backend Server]
-    B -->|Fetch Reviews| C[Database MongoDB / Memory Mock]
+    B -->|Fetch Reviews| C[Database SQLite3]
     C -->|Reviews Text| D[Chunking Module]
     D -->|N Chunks| E[Parallel Model Stage]
     sub_agent_0[ReviewResearcher 0]
@@ -34,7 +34,7 @@ graph TD
     sub_agent_1 -->|Extract Local Insights| F
     sub_agent_n -->|Extract Local Insights| F
     F -->|Collect, Deduplicate, Score, Filter| G[Post-Processing & Clean JSON Parsing]
-    G -->|Cache Results| H[MongoDB Caching Layer]
+    G -->|Cache Results| H[SQLite3 Caching Layer]
     G -->|JSON Response| B
     B -->|Formatted Output| A
 ```
@@ -70,7 +70,7 @@ The `AggregatorAgent` receives the output from all sub-agents and processes it t
 4. **Quality Filter**: Drop low-frequency, low-confidence, or irrelevant items.
 5. **Format**: Structure the output as a valid JSON array.
 
-### 5. Caching Layer (MongoDB)
+### 5. Caching Layer (SQLite3)
 Ensures that if the same product reviews are requested twice, the pipeline does not re-run, saving hardware resources and eliminating latency.
 
 ---
@@ -81,7 +81,7 @@ Ensures that if the same product reviews are requested twice, the pipeline does 
 - **Orchestration Framework**: Google ADK (Agent Development Kit)
 - **Model Connector**: LiteLLM (for local offline LLMs)
 - **Local Model Provider**: LM Studio (defaulting to MLX-optimized local models like `qwen2.5-coder-7b-instruct-mlx` and lightweight extraction models like `llama-3.2-3b-instruct`)
-- **Database / Cache**: MongoDB
+- **Database / Cache**: SQLite3
 - **Frontend**: Streamlit
 - **Hosting**: Render
 
@@ -95,7 +95,7 @@ To run the project locally with the updated local LLM provider configuration:
    ```bash
    python3 -m venv .venv
    source .venv/bin/activate
-   pip install fastapi uvicorn python-dotenv google-adk litellm pymongo streamlit matplotlib pandas
+   pip install fastapi uvicorn python-dotenv google-adk litellm streamlit matplotlib pandas
    ```
 
 2. **Configure Environment Variables ([.env](file:///Users/muhsilnr/Library/Mobile%20Documents/com~apple%20CloudDocs/Documents/codespace/litmus7_project/.env))**:

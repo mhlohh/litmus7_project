@@ -2,38 +2,14 @@ import os
 import ssl
 import urllib.request
 import pandas as pd
-from pymongo import MongoClient
-import sys
+import sqlite3
+import json
 
 # Disable SSL verification for urllib requests (needed on macOS in some environments)
 ssl._create_default_https_context = ssl._create_unverified_context
 
 # Database Connection Settings
-MONGO_URI = os.getenv("MONGO_URI", "mongodb://localhost:27017")
-DB_NAME = "litmus7"
-
-# Check if MongoDB is running and connect
-use_mongodb = False
-mongo_client = None
-db = None
-
-try:
-    mongo_client = MongoClient(MONGO_URI, serverSelectionTimeoutMS=1000)
-    # Ping to check if server is responsive
-    mongo_client.server_info()
-    db = mongo_client[DB_NAME]
-    use_mongodb = True
-    print("✅ Connected to MongoDB successfully!")
-except Exception as e:
-    print(f"⚠️ Local MongoDB connection failed: {e}")
-    print("👉 Falling back to standard in-memory storage for reviews and caching.")
-
-# In-memory storage structures if MongoDB is unavailable
-in_memory_db = {
-    "products": [],
-    "reviews": {},  # product_id -> list of review strings
-    "analysis_cache": {}  # product_id -> cached analysis JSON
-}
+DB_FILE = "data/litmus7.db"
 
 # Pre-defined Products
 DEFAULT_PRODUCTS = [
@@ -42,27 +18,65 @@ DEFAULT_PRODUCTS = [
     {"id": 3, "asin": "B07FZH9BGV", "name": "OnePlus 7 Pro", "description": "Fluid AMOLED display with 90Hz refresh rate and triple camera.", "price": 669.0, "quantity": 20}
 ]
 
+def get_connection():
+    """Returns a new SQLite3 connection with row factory configured to Row."""
+    os.makedirs(os.path.dirname(DB_FILE), exist_ok=True)
+    conn = sqlite3.connect(DB_FILE)
+    conn.row_factory = sqlite3.Row
+    return conn
+
 def initialize_database():
     """
-    Downloads raw Amazon reviews from a public dataset, filters them for 3 top products,
-    scales each to 1000+ reviews, and populates the database. Uses a local CSV cache
-    to avoid repeated network downloads.
+    Creates SQLite3 tables and populates them with initial products and Amazon reviews.
+    Augments the dataset to 1000+ reviews per product to simulate scale.
     """
-    # Check if database is already populated (MongoDB)
-    if use_mongodb:
-        # Check if products already exist
-        if db.products.count_documents({}) > 0 and db.reviews.count_documents({}) > 0:
-            print("💾 Database already populated in MongoDB. Skipping initialization.")
-            return
+    conn = get_connection()
+    cursor = conn.cursor()
+    
+    # 1. Create Schema
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS products (
+            id INTEGER PRIMARY KEY,
+            asin TEXT NOT NULL,
+            name TEXT NOT NULL,
+            description TEXT,
+            price REAL,
+            quantity INTEGER
+        )
+    """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS reviews (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            product_id INTEGER NOT NULL,
+            body TEXT NOT NULL,
+            FOREIGN KEY (product_id) REFERENCES products(id)
+        )
+    """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS analysis_cache (
+            product_id INTEGER PRIMARY KEY,
+            analysis TEXT NOT NULL,
+            FOREIGN KEY (product_id) REFERENCES products(id)
+        )
+    """)
+    conn.commit()
+    
+    # Check if database is already populated
+    cursor.execute("SELECT COUNT(*) FROM products")
+    if cursor.fetchone()[0] > 0:
+        print("💾 Database already populated in SQLite. Skipping initialization.")
+        conn.close()
+        return
         
-        db.products.delete_many({})
-        db.products.insert_many(DEFAULT_PRODUCTS)
-        db.reviews.delete_many({})
-        db.analysis_cache.delete_many({})
-    else:
-        in_memory_db["products"] = DEFAULT_PRODUCTS.copy()
-        in_memory_db["reviews"] = {}
-        in_memory_db["analysis_cache"] = {}
+    print("🚀 Initializing database with products and reviews...")
+    
+    # Populate Default Products
+    for p in DEFAULT_PRODUCTS:
+        cursor.execute(
+            "INSERT INTO products (id, asin, name, description, price, quantity) VALUES (?, ?, ?, ?, ?, ?)",
+            (p["id"], p["asin"], p["name"], p["description"], p["price"], p["quantity"])
+        )
+    conn.commit()
 
     local_cache_dir = "data"
     local_cache_file = os.path.join(local_cache_dir, "reviews_dataset.csv")
@@ -115,16 +129,13 @@ def initialize_database():
             print(f"📈 Scaled {product['name']} reviews count to {len(prod_reviews)}")
             
             # Save reviews
-            if use_mongodb:
-                review_documents = [
-                    {"product_id": product_id, "body": body} for body in prod_reviews
-                ]
-                db.reviews.insert_many(review_documents)
-            else:
-                in_memory_db["reviews"][product_id] = prod_reviews
-                
+            cursor.executemany(
+                "INSERT INTO reviews (product_id, body) VALUES (?, ?)",
+                [(product_id, body) for body in prod_reviews]
+            )
             print(f"💾 Saved {len(prod_reviews)} reviews for '{product['name']}' to database.")
             
+        conn.commit()
         print("🎉 Database Initialization Completed Successfully!")
     except Exception as e:
         print(f"❌ Error populating dataset: {e}")
@@ -140,11 +151,14 @@ def initialize_database():
             ] * 260
             stub_reviews = stub_reviews[:1005]
             
-            if use_mongodb:
-                db.reviews.insert_many([{"product_id": product_id, "body": body} for body in stub_reviews])
-            else:
-                in_memory_db["reviews"][product_id] = stub_reviews
+            cursor.executemany(
+                "INSERT INTO reviews (product_id, body) VALUES (?, ?)",
+                [(product_id, body) for body in stub_reviews]
+            )
             print(f"💾 Saved {len(stub_reviews)} stub reviews for '{product['name']}' to database.")
+        conn.commit()
+    finally:
+        conn.close()
 
 # Run initialization upon import
 initialize_database()
@@ -152,54 +166,65 @@ initialize_database()
 # Database helper functions
 
 def get_products() -> list[dict]:
-    if use_mongodb:
-        return list(db.products.find({}, {"_id": 0}))
-    return in_memory_db["products"]
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT id, asin, name, description, price, quantity FROM products")
+    rows = cursor.fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
 
-def get_product(product_id: int) -> dict:
-    if use_mongodb:
-        return db.products.find_one({"id": product_id}, {"_id": 0})
-    for p in in_memory_db["products"]:
-        if p["id"] == product_id:
-            return p
-    return None
+def get_product(product_id: int) -> dict | None:
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT id, asin, name, description, price, quantity FROM products WHERE id = ?", (product_id,))
+    row = cursor.fetchone()
+    conn.close()
+    return dict(row) if row else None
 
 def get_reviews(product_id: int) -> list[str]:
-    if use_mongodb:
-        cursor = db.reviews.find({"product_id": product_id})
-        return [doc["body"] for doc in cursor]
-    return in_memory_db["reviews"].get(product_id, [])
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT body FROM reviews WHERE product_id = ?", (product_id,))
+    rows = cursor.fetchall()
+    conn.close()
+    return [r["body"] for r in rows]
 
 def add_review(product_id: int, review_text: str):
-    if use_mongodb:
-        db.reviews.insert_one({"product_id": product_id, "body": review_text})
-        # Invalidate the cache since database has a new review
-        clear_cache(product_id)
-    else:
-        if product_id not in in_memory_db["reviews"]:
-            in_memory_db["reviews"][product_id] = []
-        in_memory_db["reviews"][product_id].append(review_text)
-        clear_cache(product_id)
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("INSERT INTO reviews (product_id, body) VALUES (?, ?)", (product_id, review_text))
+    conn.commit()
+    conn.close()
+    # Invalidate the cache since database has a new review
+    clear_cache(product_id)
 
 def get_cached_analysis(product_id: int) -> list[dict] | None:
-    if use_mongodb:
-        doc = db.analysis_cache.find_one({"product_id": product_id})
-        return doc["analysis"] if doc else None
-    return in_memory_db["analysis_cache"].get(product_id, None)
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT analysis FROM analysis_cache WHERE product_id = ?", (product_id,))
+    row = cursor.fetchone()
+    conn.close()
+    if row:
+        try:
+            return json.loads(row["analysis"])
+        except Exception:
+            return None
+    return None
 
 def cache_analysis(product_id: int, analysis: list[dict]):
-    if use_mongodb:
-        db.analysis_cache.update_one(
-            {"product_id": product_id},
-            {"$set": {"analysis": analysis}},
-            upsert=True
-        )
-    else:
-        in_memory_db["analysis_cache"][product_id] = analysis
+    conn = get_connection()
+    cursor = conn.cursor()
+    analysis_str = json.dumps(analysis)
+    cursor.execute(
+        "INSERT OR REPLACE INTO analysis_cache (product_id, analysis) VALUES (?, ?)",
+        (product_id, analysis_str)
+    )
+    conn.commit()
+    conn.close()
 
 def clear_cache(product_id: int):
-    if use_mongodb:
-        db.analysis_cache.delete_one({"product_id": product_id})
-    else:
-        if product_id in in_memory_db["analysis_cache"]:
-            del in_memory_db["analysis_cache"][product_id]
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM analysis_cache WHERE product_id = ?", (product_id,))
+    conn.commit()
+    conn.close()

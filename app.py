@@ -4,6 +4,38 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import time
 
+# Category and Status Style Configuration
+CATEGORY_COLORS = {
+    "Quality": ("rgba(239, 68, 68, 0.15)", "#f87171"),       # Red
+    "Support": ("rgba(245, 158, 11, 0.15)", "#fbbf24"),       # Amber
+    "Usability": ("rgba(37, 99, 235, 0.15)", "#60a5fa"),     # Blue
+    "Price": ("rgba(34, 197, 94, 0.15)", "#4ade80"),         # Green
+    "Features": ("rgba(168, 85, 247, 0.15)", "#c084fc"),      # Purple
+    "Other": ("rgba(107, 114, 128, 0.15)", "#9ca3af")         # Gray
+}
+
+STATUS_STYLES = {
+    "Working well": {
+        "bg": "rgba(34, 197, 94, 0.15)",
+        "text": "#4ade80",
+        "border": "rgba(34, 197, 94, 0.3)"
+    },
+    "Worth watching": {
+        "bg": "rgba(234, 179, 8, 0.15)",
+        "text": "#facc15",
+        "border": "rgba(234, 179, 8, 0.3)"
+    },
+    "Needs attention": {
+        "bg": "rgba(239, 68, 68, 0.15)",
+        "text": "#f87171",
+        "border": "rgba(239, 68, 68, 0.3)"
+    }
+}
+
+def get_category_style(category: str):
+    cat_cap = category.capitalize()
+    return CATEGORY_COLORS.get(cat_cap, CATEGORY_COLORS["Other"])
+
 # Page Configuration
 st.set_page_config(
     page_title="litmus7 | Product Review Intelligence",
@@ -113,9 +145,22 @@ with st.sidebar:
         
     st.markdown("---")
     st.markdown("### ⚙️ Pipeline Control")
-    if st.button("🔄 Reload Products"):
+    if st.button("🔄 Reload Products", use_container_width=True):
         st.cache_data.clear()
         st.rerun()
+        
+    if st.button("🗑️ Clear Analysis Cache", use_container_width=True):
+        try:
+            resp = requests.delete(f"{API_BASE}/analyze/{product_id}/cache")
+            if resp.status_code == 200:
+                if "insights" in st.session_state:
+                    del st.session_state["insights"]
+                st.sidebar.success("Analysis cache cleared successfully!")
+                st.rerun()
+            else:
+                st.sidebar.error(f"Failed to clear cache: {resp.text}")
+        except Exception as e:
+            st.sidebar.error(f"Failed to communicate with backend: {e}")
 
 # ----------------- Main Layout -----------------
 
@@ -206,31 +251,51 @@ if "insights" in st.session_state and st.session_state.get("analyzed_prod_id") =
         st.markdown("#### 📈 Key Takeaways Severity Chart")
         df_insights = pd.DataFrame(insights)
         
+        # Sort for display
+        df_insights_sorted = df_insights.sort_values(by="score", ascending=True)
+        num_insights = len(df_insights_sorted)
+        
+        # Dynamically scale figure height based on the number of insights to prevent overlapping labels
+        fig_height = max(4.5, num_insights * 0.85)
+        
         # Matplotlib Chart Generation
-        fig, ax = plt.subplots(figsize=(8, 3.5))
+        fig, ax = plt.subplots(figsize=(10.5, fig_height))
         fig.patch.set_facecolor('#0e1117')
         ax.set_facecolor('#1e293b')
         
-        # Sort for display
-        df_insights_sorted = df_insights.sort_values(by="score", ascending=True)
-        
         colors = []
-        for score in df_insights_sorted['score']:
-            if score >= 2.0:
-                colors.append('#ef4444') # Red for High
-            elif score >= 1.3:
-                colors.append('#f59e0b') # Amber for Medium
+        for _, row in df_insights_sorted.iterrows():
+            status = row.get('status', 'Needs attention')
+            if status == "Working well":
+                colors.append('#10b981') # Green
+            elif status == "Worth watching":
+                colors.append('#f59e0b') # Amber
             else:
-                colors.append('#3b82f6') # Blue for Low
+                colors.append('#ef4444') # Red
                 
         bars = ax.barh(
-            df_insights_sorted['insight'].str.wrap(30), 
+            df_insights_sorted['insight'].str.wrap(55), 
             df_insights_sorted['score'], 
             color=colors, 
             edgecolor='none', 
-            height=0.6
+            height=0.55
         )
         
+        # Add score labels next to the bars for readability
+        max_score = df_insights_sorted['score'].max() if not df_insights_sorted.empty else 10.0
+        for bar in bars:
+            width = bar.get_width()
+            ax.text(
+                width + (max_score * 0.015),
+                bar.get_y() + bar.get_height()/2,
+                f'{width:.1f}',
+                ha='left',
+                va='center',
+                color='#e2e8f0',
+                fontsize=8,
+                fontweight='bold'
+            )
+            
         # Customizing Axes
         ax.spines['top'].set_visible(False)
         ax.spines['right'].set_visible(False)
@@ -239,48 +304,94 @@ if "insights" in st.session_state and st.session_state.get("analyzed_prod_id") =
         ax.tick_params(colors='#94a3b8', labelsize=8)
         ax.xaxis.grid(True, linestyle='--', alpha=0.1, color='#e2e8f0')
         ax.set_xlabel('Priority Score', color='#e2e8f0', fontsize=9)
-        plt.tight_layout()
+        ax.set_xlim(0, max_score * 1.12)  # Give padding on the right for text labels
         
+        fig.subplots_adjust(left=0.45, right=0.92, top=0.92, bottom=0.15)
         st.pyplot(fig)
         
         st.markdown("---")
         
         # 3. Insights Cards List
         st.markdown("#### 💡 Detailed Strategic Insights")
-        for idx, item in enumerate(insights):
-            score = item.get("score", 0.0)
-            freq = item.get("frequency", 1)
-            quote = item.get("example_quote", "N/A")
-            cat = item.get("category", "other").capitalize()
+        
+        # Category Filter and Sort Controls
+        col1, col2 = st.columns(2)
+        with col1:
+            all_cats = ["All Categories"] + sorted(list(set(item.get("category", "other").capitalize() for item in insights)))
+            selected_category = st.selectbox("Filter by Category", all_cats)
+        with col2:
+            sort_options = {
+                "Biggest issues first": ("score", True),
+                "Most talked about": ("frequency", False)
+            }
+            selected_sort = st.selectbox("Sort by", list(sort_options.keys()))
             
-            # Tag mapping
-            if score >= 2.0:
-                tag_color = "#fef2f2"
-                tag_text_color = "#ef4444"
-                border_color = "#ef4444"
-                badge = "🔴 High Priority"
-            elif score >= 1.3:
-                tag_color = "#fffbeb"
-                tag_text_color = "#f59e0b"
-                border_color = "#f59e0b"
-                badge = "🟡 Medium Priority"
-            else:
-                tag_color = "#eff6ff"
-                tag_text_color = "#3b82f6"
-                border_color = "#3b82f6"
-                badge = "🔵 Low Priority"
+        # Filter insights
+        filtered_insights = []
+        for item in insights:
+            cat = item.get("category", "other").capitalize()
+            if selected_category == "All Categories" or cat == selected_category:
+                filtered_insights.append(item)
                 
-            st.markdown(f"""
-            <div style="background: rgba(30, 41, 59, 0.2); border-left: 4px solid {border_color}; border-radius: 8px; padding: 1.2rem; margin-bottom: 1rem; border-top: 1px solid rgba(255,255,255,0.03); border-right: 1px solid rgba(255,255,255,0.03); border-bottom: 1px solid rgba(255,255,255,0.03);">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
-                    <span style="background-color: {tag_color}; color: {tag_text_color}; font-size: 0.8rem; font-weight: bold; padding: 0.2rem 0.6rem; border-radius: 20px;">{badge} (Score: {score})</span>
-                    <span style="color: #94a3b8; font-size: 0.85rem;">📁 Category: <b>{cat}</b> | Frequency: {freq}</span>
-                </div>
-                <div style="font-size: 1rem; font-weight: bold; color: #f8fafc; margin-bottom: 0.6rem;">{item.get('insight', '')}</div>
-                <div style="font-style: italic; color: #94a3b8; padding-left: 0.8rem; border-left: 2px solid rgba(255,255,255,0.1); font-size: 0.9rem;">
-                    "{quote}"
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
+        # Sort insights
+        sort_field, ascending = sort_options[selected_sort]
+        filtered_insights = sorted(filtered_insights, key=lambda x: float(x.get(sort_field, 0.0)), reverse=not ascending)
+        
+        # Render cards in a responsive 2-column grid
+        for i in range(0, len(filtered_insights), 2):
+            cols = st.columns(2)
+            for j in range(2):
+                if i + j < len(filtered_insights):
+                    item = filtered_insights[i + j]
+                    cat = item.get("category", "other").capitalize()
+                    status = item.get("status", "Needs attention")
+                    score = item.get("score", 0.0)
+                    freq = item.get("frequency", 1)
+                    quote = item.get("example_quote", "N/A")
+                    insight = item.get("insight", "")
+                    
+                    bg_cat, text_cat = get_category_style(cat)
+                    status_style = STATUS_STYLES.get(status, STATUS_STYLES["Needs attention"])
+                    border_color = status_style["text"]
+                    
+                    with cols[j]:
+                        st.markdown(f"""
+                        <div title="System Metrics -> Exact Score: {score} | Frequency: {freq}" 
+                             style="background: rgba(30, 41, 59, 0.2); 
+                                    border-left: 4px solid {border_color}; 
+                                    border-radius: 8px; 
+                                    padding: 1.2rem; 
+                                    margin-bottom: 1rem; 
+                                    border-top: 1px solid rgba(255,255,255,0.03); 
+                                    border-right: 1px solid rgba(255,255,255,0.03); 
+                                    border-bottom: 1px solid rgba(255,255,255,0.03);
+                                    height: 100%;
+                                    display: flex;
+                                    flex-direction: column;
+                                    justify-content: space-between;">
+                            <div>
+                                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.8rem;">
+                                    <span style="background-color: {bg_cat}; color: {text_cat}; font-size: 0.75rem; font-weight: bold; padding: 0.2rem 0.6rem; border-radius: 20px;">
+                                        📁 {cat}
+                                    </span>
+                                    <span style="background-color: {status_style['bg']}; color: {status_style['text']}; border: 1px solid {status_style['border']}; font-size: 0.75rem; font-weight: bold; padding: 0.2rem 0.6rem; border-radius: 20px;">
+                                        {status}
+                                    </span>
+                                </div>
+                                <div style="font-size: 1rem; font-weight: bold; color: #f8fafc; margin-bottom: 0.6rem; line-height: 1.4;">
+                                    {insight}
+                                </div>
+                            </div>
+                            <div>
+                                <div style="display: flex; align-items: center; gap: 0.4rem; color: #94a3b8; font-size: 0.85rem; margin-bottom: 0.6rem;">
+                                    <span>👥</span>
+                                    <span>{freq} customers brought this up</span>
+                                </div>
+                                <div style="font-style: italic; color: #94a3b8; padding-left: 0.8rem; border-left: 2px solid rgba(255,255,255,0.1); font-size: 0.85rem; line-height: 1.4;">
+                                    "{quote}"
+                                </div>
+                            </div>
+                        </div>
+                        """, unsafe_allow_html=True)
 else:
     st.info("Click the 'Analyze Reviews' button to process the feedback and extract strategic business insights.")
