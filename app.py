@@ -218,7 +218,7 @@ if "insights" in st.session_state and st.session_state.get("analyzed_prod_id") =
             <div class="metric-card">
                 <div style="font-size: 1.8rem;">⚡</div>
                 <div style="font-weight: bold; color: #10b981; font-size: 1.1rem;">CACHE HIT</div>
-                <div style="color: #94a3b8; font-size: 0.85rem;">Loaded from MongoDB cache</div>
+                <div style="color: #94a3b8; font-size: 0.85rem;">Loaded from Sqlite3 cache</div>
             </div>
             """, unsafe_allow_html=True)
         else:
