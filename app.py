@@ -118,9 +118,9 @@ def fetch_products():
         pass
     # Fallback to local default list if backend is not started
     return [
-        {"id": 1, "asin": "B00F2SKPIM", "name": "Samsung Galaxy S10", "description": "Flagship Samsung smartphone."},
-        {"id": 2, "asin": "B00836Y6B2", "name": "iPhone XR", "description": "Liquid Retina display, Face ID."},
-        {"id": 3, "asin": "B07FZH9BGV", "name": "OnePlus 7 Pro", "description": "Fluid AMOLED display."}
+        {"id": 1, "asin": "B00F2SKPIM", "name": "Samsung Galaxy Note 3", "description": "Classic Samsung phablet with S-Pen."},
+        {"id": 2, "asin": "B00836Y6B2", "name": "Nokia Lumia 900", "description": "Classic Windows Phone with Zune integration."},
+        {"id": 3, "asin": "B07FZH9BGV", "name": "Samsung Galaxy Note 9", "description": "Flagship smartphone with S-Pen and Bixby."}
     ]
 
 # Fetch products
@@ -251,8 +251,17 @@ if "insights" in st.session_state and st.session_state.get("analyzed_prod_id") =
         st.markdown("#### 📈 Key Takeaways Severity Chart")
         df_insights = pd.DataFrame(insights)
         
-        # Sort for display
-        df_insights_sorted = df_insights.sort_values(by="score", ascending=True)
+        # Sort for display if 'score' exists
+        if "score" in df_insights.columns:
+            df_insights_sorted = df_insights.sort_values(by="score", ascending=True)
+        else:
+            df_insights_sorted = df_insights.copy()
+            # Ensure the column exists for rendering logic below
+            df_insights_sorted["score"] = 0.0
+            
+        if "insight" not in df_insights_sorted.columns:
+            df_insights_sorted["insight"] = "Unknown Insight"
+            
         num_insights = len(df_insights_sorted)
         
         # Dynamically scale figure height based on the number of insights to prevent overlapping labels

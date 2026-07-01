@@ -1,5 +1,4 @@
 from fastapi import FastAPI, HTTPException, Body
-from models import Product
 from contextlib import asynccontextmanager
 from model_provider import setup, ask
 import database
